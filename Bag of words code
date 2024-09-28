@@ -1,0 +1,86 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+import re
+from nltk.corpus import stopwords
+import nltk
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+nltk.download('stopwords')
+
+#Step 1: Raccolta dati
+
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+#Step 2: Preprocessing dei dati
+stop_words = set(stopwords.words('english'))
+
+
+def preprocess_text(text):
+    #Rimuovo caratteri speciali e numeri
+    text = re.sub('[^\w\s]', '', text)
+    #Converto il testo in minuscolo
+    text = text.lower()
+    #Tokenizzo il testo
+    tokens = text.split()
+    #Rimuovo le stopwords
+    tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(tokens)
+
+
+df['cleaned_Text'] = df['Text'].apply(preprocess_text)
+
+#Step 3: Rappresentazione dei dati
+vectorizer = CountVectorizer()
+X = vectorizer.fit_transform(df['cleaned_Text'])
+y = df['Sentiment']
+
+#Step 4: Divisione del dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y )
+
+#Step 5: Addestramento dei modelli
+models = {
+    "MultinomialNB": MultinomialNB(),
+    "SVM": SVC(kernel='linear'),
+    "DecisionTree": DecisionTreeClassifier(random_state=42)
+}
+
+for model_name, model in models.items():
+    print(f"Training {model_name}...")
+    model.fit(X_train, y_train)
+
+#Step 6: Valutazione dei modelli e del F1 complessivo
+print("\nValutazione dei modelli:")
+for model_name, model in models.items():
+    print(f"\n{model_name}:")
+    y_pred = model.predict(X_test)
+    report = classification_report(y_test, y_pred)
+    print(report)
+    print(f"F1 score complessivo per {model_name}: {report.split()[-2]}")
+
+    cm = confusion_matrix(y_test, y_pred)
+    print("Matrice di confusione:")
+    print(cm)
+
+
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=df['Sentiment'].unique(),
+                yticklabels=df['Sentiment'].unique())
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.title(f'Matrice di Confusione per {model_name}')
+    plt.show()
+
+
+
+
+    #prime 10 righe dei valori predetti e quelli veri
+    print(f"\nPrimi 10 valori predetti e veri per {model_name}:")
+    for true_value, predicted_value in list(zip(y_test, y_pred))[:10]:
+        print(f"Valore vero: {true_value}, Valore predetto: {predicted_value}")
+
