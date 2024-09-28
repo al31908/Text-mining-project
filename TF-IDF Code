@@ -1,0 +1,47 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report
+import re
+from nltk.corpus import stopwords
+import nltk
+
+nltk.download('stopwords')
+
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+stop_words = set(stopwords.words('english'))
+
+def preprocess_text(text):
+    text = re.sub('[^\w\s]', '', text)
+    text = text.lower()
+    tokens = text.split()
+    tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(tokens)
+
+df['cleaned_Text'] = df['Text'].apply(preprocess_text)
+
+
+X_train, X_test, y_train, y_test = train_test_split(df['cleaned_Text'], df['Sentiment'], test_size=0.2, random_state=42)
+
+#rappresentazione dei dati con TF-IDF
+vectorizer = TfidfVectorizer()
+X_train_tfidf = vectorizer.fit_transform(X_train)
+X_test_tfidf = vectorizer.transform(X_test)
+
+models = {
+    "MultinomialNB with TF-IDF": MultinomialNB(),
+    "SVM with TF-IDF": SVC(kernel='linear'),
+    "DecisionTree with TF-IDF": DecisionTreeClassifier(random_state=42)
+}
+
+for model_name, model in models.items():
+    print(f"Training {model_name}...")
+    model.fit(X_train_tfidf, y_train)
+    y_pred = model.predict(X_test_tfidf)
+    print(f"Classification report for {model_name}:\n{classification_report(y_test, y_pred)}\n")
+    f1_macro = classification_report(y_test, y_pred, output_dict=True)['macro avg']['f1-score']
+    print(f"F1 macro for {model_name}: {f1_macro}\n")
