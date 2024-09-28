@@ -1,0 +1,73 @@
+import pandas as pd
+import re
+from sklearn.preprocessing import LabelEncoder
+from transformers import pipeline
+import nltk
+from nltk.corpus import stopwords
+from sklearn.metrics import classification_report, f1_score, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+nltk.download('stopwords')
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+stop_words = set(stopwords.words('english'))
+
+def preprocess_text(text):
+    text = re.sub('[^\w\s]', '', text)
+    text = text.lower()
+    tokens = text.split()
+    tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(tokens)
+
+df['cleaned_Text'] = df['Text'].apply(preprocess_text)
+print(df[['Text', 'cleaned_Text']].head())
+
+#encoding delle etichette (non necessario per l'uso diretto del modello, ma utile per valutazione)
+label_encoder = LabelEncoder()
+df['label'] = label_encoder.fit_transform(df['Sentiment'])
+class_names = label_encoder.classes_
+
+#carica il pipeline del modello pre-addestrato
+model_name = 'cardiffnlp/twitter-roberta-base-sentiment'
+sentiment_pipeline = pipeline('sentiment-analysis', model=model_name, tokenizer=model_name)
+
+#valutazione del modello pre-addestrato sulle recensioni
+def get_sentiment(text):
+    result = sentiment_pipeline(text, truncation=True, max_length=512)
+    return result[0]['label'] if result else None
+
+#applico il modello alle recensioni di test
+df['predicted_sentiment'] = df['cleaned_Text'].apply(get_sentiment)
+
+#mappatura delle etichette previste alle etichette originali
+label_mapping = {
+    'LABEL_0': 'negativo',
+    'LABEL_2': 'positivo'
+}
+
+#mappa le etichette e gestisco eventuali etichette 'neutral' come 'negative'
+df['predicted_sentiment'] = df['predicted_sentiment'].map(lambda x: label_mapping.get(x, 'negativo'))
+
+#converto le etichette previste per la valutazione
+df['predicted_label'] = label_encoder.transform(df['predicted_sentiment'])
+
+#valutazione delle prestazioni
+f1 = f1_score(df['label'], df['predicted_label'], average='weighted')
+print(f'F1 Score: {f1}')
+print(classification_report(df['label'], df['predicted_label'], target_names=class_names))
+label_counts = df['predicted_sentiment'].value_counts()
+print("Occurrences predicted for each label:")
+print(label_counts)
+
+
+cm = confusion_matrix(df['label'], df['predicted_label'])
+
+
+fig, ax = plt.subplots(figsize=(6, 6))
+sns.heatmap(cm, annot=True, ax=ax, fmt='d', cmap='Blues')
+ax.set_xlabel('Predicted label')
+ax.set_ylabel('Etichetta effettiva')
+plt.title('Matrice di confusione')
+plt.show()
+
