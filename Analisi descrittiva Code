@@ -1,0 +1,187 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk import pos_tag, bigrams
+from collections import Counter
+import numpy as np
+
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('averaged_perceptron_tagger')
+
+data = pd.read_csv('RECENSIONI_BINARY.csv')
+def map_sentiment(stars):
+    if pd.notnull(stars):
+        if stars >= 7:
+            return "positivo"
+        else:
+            return "negativo"
+    else:
+        return None
+
+data['Sentiment'] = data['Stars'].apply(map_sentiment)
+data.to_csv("/Users/alessandrocarmellini/Desktop/Text_mining/Text_mining/RECENSIONI_BINARY.csv", index=False)
+
+df = pd.read_csv('RECENSIONI_BINARY.csv')
+assert 'Text' in df.columns and 'Sentiment' in df.columns, "The dataset must contain 'Text' and 'Sentiment' columns"
+
+df_with_stars = df.dropna(subset=["Stars"])
+df_with_stars.to_csv("RECENSIONI_BIN_STARS.csv", index=False)
+
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+df['Year'] = pd.to_datetime(df['Date']).dt.year
+
+#Distribuzione del numero di stars
+plt.figure(figsize=(10, 6))
+sns.histplot(df['Stars'], bins=10, kde=False, edgecolor='black')
+plt.title('Distribuzione delle Recensioni per Voto (Stars)')
+plt.xlabel('Stars')
+plt.ylabel('Frequenza')
+plt.xticks(range(1, 11))
+plt.grid(False)
+plt.show()
+
+#Distribuzioni del numero di recensioni per anno
+reviews_per_year = df['Year'].value_counts().sort_index()
+plt.figure(figsize=(14, 6))
+plt.bar(reviews_per_year.index, reviews_per_year.values, color='orange', edgecolor='black')
+plt.title('Distribuzione del Numero di Recensioni per Anno')
+plt.xlabel('Anno')
+plt.ylabel('Numero di Recensioni')
+plt.xticks(reviews_per_year.index, rotation=45)
+plt.grid(axis='y')
+plt.tight_layout()
+plt.show()
+
+#Distribuzione delle stelle prima della fine della serie e dopo la fine
+reviews_2006_to_2012 = df[(df['Year'] >= 2006) & (df['Year'] <= 2012)]
+stars_distribution_2006_to_2012 = reviews_2006_to_2012['Stars'].value_counts().sort_index()
+reviews_from_2013_onwards = df[df['Year'] >= 2013]
+stars_distribution_from_2013_onwards = reviews_from_2013_onwards['Stars'].value_counts().sort_index()
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+axes[0].bar(stars_distribution_2006_to_2012.index, stars_distribution_2006_to_2012.values, color='blue', edgecolor='black')
+axes[0].set_title('Distribuzione delle Stelle dal 2006 al 2012')
+axes[0].set_xlabel('Stelle')
+axes[0].set_ylabel('Numero di Recensioni')
+axes[0].set_xticks(range(1, 11))
+axes[0].grid(False)
+axes[1].bar(stars_distribution_from_2013_onwards.index, stars_distribution_from_2013_onwards.values, color='green', edgecolor='black')
+axes[1].set_title('Distribuzione delle Stelle dal 2013 in poi')
+axes[1].set_xlabel('Stelle')
+axes[1].set_xticks(range(1, 11))
+axes[1].grid(False)
+plt.tight_layout()
+plt.show()
+
+#Andamento temporale recensioni positive e negative
+negative_reviews = df[df['Sentiment'] == 'negativo']
+positive_reviews = df[df['Sentiment'] == 'positivo']
+positive_reviews_per_year = positive_reviews['Year'].value_counts().sort_index()
+negative_reviews_per_year = negative_reviews['Year'].value_counts().sort_index()
+
+plt.figure(figsize=(10, 6))
+plt.plot(negative_reviews_per_year.index, negative_reviews_per_year.values, marker='o', color='red', linestyle='-', label='Negativo')
+plt.plot(positive_reviews_per_year.index, positive_reviews_per_year.values, marker='o', color='green', linestyle='-', label='Positivo')
+plt.yscale('log')
+plt.title('Andamento nel Tempo delle Recensioni con Sentiment Negativo e Positivo (Scala Logaritmica)')
+plt.xlabel('Anno')
+plt.ylabel('Numero di Recensioni (Scala Logaritmica)')
+plt.xticks(range(int(df['Year'].min()), int(df['Year'].max()) + 1), rotation=45)
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#Lunghezza testo recensioni positive e negative
+num_negative_reviews = len(negative_reviews)
+positive_sample = positive_reviews.groupby('Stars', group_keys=False).apply(lambda x: x.sample(min(len(x), num_negative_reviews // positive_reviews['Stars'].nunique())))
+negative_reviews['review_length'] = negative_reviews['Text'].apply(lambda x: len(x.split()))
+positive_sample['review_length'] = positive_sample['Text'].apply(lambda x: len(x.split()))
+
+plt.figure(figsize=(10, 6))
+sns.histplot(negative_reviews['review_length'], bins=30, kde=True, color='red', label='Negative', alpha=0.6)
+sns.histplot(positive_sample['review_length'], bins=30, kde=True, color='blue', label='Positive', alpha=0.6)
+plt.yscale('log')
+plt.title('Distribuzione della Lunghezza delle Recensioni Positive e Negative')
+plt.xlabel('Lunghezza della Recensione (numero di parole)')
+plt.ylabel('Frequenza (logaritmica)')
+plt.legend()
+plt.show()
+
+#10 parole più frequenti nelle recensioni positive
+all_positive_text = ' '.join(positive_reviews['Text'])
+tokens = word_tokenize(all_positive_text.lower())
+stop_words = set(stopwords.words('english'))
+filtered_tokens = [word for word in tokens if word.isalnum() and word not in stop_words]
+word_freq = Counter(filtered_tokens)
+most_common_words = word_freq.most_common(10)
+print("Le 10 parole più frequenti (escluse le stop words):")
+for word, freq in most_common_words:
+    print(f"{word}: {freq}")
+
+words, freqs = zip(*most_common_words)
+plt.figure(figsize=(10, 6))
+plt.bar(words, freqs, color='green', edgecolor='black')
+plt.title('Le 10 Parole Più Frequenti ')
+plt.xlabel('Parole')
+plt.ylabel('Frequenza')
+plt.grid(False)
+plt.tight_layout()
+plt.show()
+
+#10 aggettivi più frequenti e i 10 bigrammi contenenti un aggettivo più frequenti nelle recensioni positive
+exclude_words = {'medical', 'hugh', 'laurie', 'robert', 'sean', 'leonard', 'much', 'last', 'many', 'american', 'gregory'}
+filtered_tokens = [word for word in tokens if word.isalnum() and word not in stop_words and word not in exclude_words]
+tagged_tokens = pos_tag(filtered_tokens, lang='eng')
+adjectives = [word for word, pos in tagged_tokens if pos == 'JJ']
+adjective_freq = Counter(adjectives)
+most_common_adjectives = adjective_freq.most_common(10)
+print("I 10 aggettivi più frequenti:")
+for word, freq in most_common_adjectives:
+    print(f"{word}: {freq}")
+
+bigram_tokens = list(bigrams(tagged_tokens))
+adjective_bigrams = [bigram for bigram in bigram_tokens if 'JJ' in [pos for word, pos in bigram]]
+adjective_bigram_freq = Counter(adjective_bigrams)
+most_common_adjective_bigrams = adjective_bigram_freq.most_common(10)
+print("\nI 10 bigrammi più frequenti che includono un aggettivo:")
+for bigram, freq in most_common_adjective_bigrams:
+    print(f"{bigram[0][0]} {bigram[1][0]}: {freq}")
+
+adjectives, freqs = zip(*most_common_adjectives)
+plt.figure(figsize=(10, 6))
+plt.bar(adjectives, freqs, color='green', edgecolor='black')
+plt.title('I 10 Aggettivi Più Frequenti')
+plt.xlabel('Aggettivi')
+plt.ylabel('Frequenza')
+plt.grid(False)
+plt.tight_layout()
+plt.show()
+
+bigram_words, bigram_freqs = zip(*most_common_adjective_bigrams)
+plt.figure(figsize=(12, 6))
+plt.bar([' '.join([word for word, pos in bigram]) for bigram in bigram_words], bigram_freqs, color='blue', edgecolor='black')
+plt.title('I 10 Bigrammi Più Frequenti che Includono un Aggettivo')
+plt.xlabel('Bigrammi')
+plt.ylabel('Frequenza')
+plt.xticks(rotation=45)
+plt.grid(False)
+plt.tight_layout()
+plt.show()
+
+# Gli 11 aggettivi più frequenti nelle recensioni negative
+all_negative_text = ' '.join(negative_reviews['Text'])
+tokens = word_tokenize(all_negative_text.lower())
+exclude_words = {'medical', 'hugh', 'laurie', 'robert', 'sean', 'leonard', 'much', 'last', 'many', 'american', 'gregory', 'patient', 'first', 'real'}
+filtered_tokens = [word for word in tokens if word.isalnum() and word not in stop_words and word not in exclude_words]
+tagged_tokens = pos_tag(filtered_tokens, lang='eng')
+adjectives = [word for word, pos in tagged_tokens if pos == 'JJ']
+adjective_freq = Counter(adjectives)
+most_common_adjectives = dict(adjective_freq.most_common(11))
+
+plt.figure(figsize=(10, 6))
