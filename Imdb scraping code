@@ -1,0 +1,49 @@
+import csv
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+import time
+
+
+driver = webdriver.Chrome()
+
+
+url = 'https://www.imdb.com/title/tt0412142/reviews?ref_=tt_urv'
+driver.get(url)
+
+#clicco ripetutamente sul pulsante "Load More" finché non abbiamo almeno 700 recensioni
+while True:
+    html_content = driver.page_source
+    soup = BeautifulSoup(html_content, 'html.parser')
+    review_divs = soup.find_all('div', class_='text show-more__control')
+    if len(review_divs) >= 700:
+        break
+    try:
+        load_more_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.ID, 'load-more-trigger'))
+        )
+        load_more_button.click()
+        time.sleep(2)  #piccolo ritardo per il caricamento
+    except:
+        break
+
+reviews_data = []
+for review in soup.find_all('div', class_='lister-item-content'):
+    user = review.find('span', class_='display-name-link').text.strip()
+    stars_tag = review.find('span', class_='rating-other-user-rating')
+    stars = int(stars_tag.span.text.strip().split('/')[0]) if stars_tag else None
+    date = review.find('span', class_='review-date').text.strip()
+    text_tag = review.find('div', class_='text show-more__control') or review.find('div', class_='text show-more__control clickable')
+    text = text_tag.text.strip() if text_tag else ""
+    reviews_data.append((user, stars, date, text))
+
+driver.quit()
+
+with open('RECENSIONI_BINARY.csv', 'w', newline='', encoding='utf-8') as file:
+    writer = csv.writer(file)
+    writer.writerow(['User', 'Stars', 'Date', 'Text'])
+    writer.writerows(reviews_data)
+
+print("Dati delle recensioni salvati con successo in 'RECENSIONI_BINARY.csv'")
