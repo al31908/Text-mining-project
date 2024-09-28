@@ -1,0 +1,93 @@
+from gensim.models import Word2Vec
+from nltk.tokenize import word_tokenize
+import pandas as pd
+import re
+import nltk
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import f1_score, classification_report, confusion_matrix
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+nltk.download('punkt')
+
+
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+
+def preprocess_text(text):
+    text = re.sub('[^\w\s]', '', text)
+    text = text.lower()
+    tokens = word_tokenize(text)
+    return tokens
+
+df['tokenized_text'] = df['Text'].apply(preprocess_text)
+
+
+model = Word2Vec(sentences=df['tokenized_text'], vector_size=100, window=5, min_count=1, workers=4)
+
+#ottengo i vettori di frase per le recensioni
+sentence_vectors = []
+for tokens in df['tokenized_text']:
+    word_vectors = []
+    for token in tokens:
+        if token in model.wv:
+            word_vector = model.wv[token]
+            word_vectors.append(word_vector)
+    if word_vectors:
+        sentence_vector = np.mean(word_vectors, axis=0)
+        sentence_vectors.append(sentence_vector)
+
+
+X = np.array(sentence_vectors)
+y = df['Sentiment']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+
+models = {
+    "SVM": SVC(),
+    "Random Forest": RandomForestClassifier(),
+    "DecisionTree": DecisionTreeClassifier(),
+    "MultinomialNB": MultinomialNB()
+}
+
+
+def plot_confusion_matrix(cm, model_name):
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=np.unique(y), yticklabels=np.unique(y))
+    plt.xlabel('Predicted label')
+    plt.ylabel('True label')
+    plt.title(f'Confusion Matrix for {model_name}')
+    plt.show()
+
+#addestramento e valutazione dei modelli
+for model_name, model in models.items():
+    print(f"Training {model_name}...")
+
+    if model_name == "MultinomialNB":
+        #applico la trasformazione Min-Max solo per MultinomialNB per evitare valori negativi
+        scaler = MinMaxScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+    else:
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+
+    f1 = f1_score(y_test, y_pred, average='weighted')
+    cm = confusion_matrix(y_test, y_pred)
+
+    print(f"Evaluation results for {model_name}:")
+    print(f"F1 score: {f1}")
+    print(classification_report(y_test, y_pred))
+    print(f"Confusion Matrix:\n{cm}")
+    print("----------------------------------------")
+
+    plot_confusion_matrix(cm, model_name)
