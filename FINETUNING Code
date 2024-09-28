@@ -1,0 +1,145 @@
+import pandas as pd
+import re
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from transformers import RobertaTokenizer, RobertaForSequenceClassification, Trainer, TrainingArguments, DataCollatorWithPadding
+from datasets import Dataset, load_metric
+import nltk
+from nltk.corpus import stopwords
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+import numpy as np
+import wandb
+import torch
+import os
+import json
+import matplotlib.pyplot as plt
+
+wandb.login()
+
+nltk.download('stopwords')
+
+df = pd.read_csv('RECENSIONI_BIN_STARS.csv')
+
+stop_words = set(stopwords.words('english'))
+
+def preprocess_text(text):
+    text = re.sub('[^\w\s]', '', text)
+    text = text.lower()
+    tokens = text.split()
+    tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(tokens)
+
+df['cleaned_Text'] = df['Text'].apply(preprocess_text)
+print(df[['Text', 'cleaned_Text']].head())
+
+label_encoder = LabelEncoder()
+df['label'] = label_encoder.fit_transform(df['Sentiment'])
+
+train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+
+#creazione del dataset per Hugging Face
+train_dataset = Dataset.from_pandas(train_df[['cleaned_Text', 'label']])
+test_dataset = Dataset.from_pandas(test_df[['cleaned_Text', 'label']])
+
+#aggiungo feature e ClassLabel per i dataset
+class_names = label_encoder.classes_
+train_dataset = train_dataset.class_encode_column('label')
+test_dataset = test_dataset.class_encode_column('label')
+
+#caricamento del tokenizer e del modello preaddestrato
+model_name = 'cardiffnlp/twitter-roberta-base-sentiment'
+tokenizer = RobertaTokenizer.from_pretrained(model_name)
+model = RobertaForSequenceClassification.from_pretrained(model_name, num_labels=len(class_names), ignore_mismatched_sizes=True)
+
+#tokenizzazione
+def tokenize_function(examples):
+    return tokenizer(examples['cleaned_Text'], truncation=True, padding='max_length', max_length=512)
+
+train_dataset = train_dataset.map(tokenize_function, batched=True)
+test_dataset = test_dataset.map(tokenize_function, batched=True)
+
+train_dataset = train_dataset.remove_columns(['cleaned_Text'])
+test_dataset = test_dataset.remove_columns(['cleaned_Text'])
+
+#Data collator
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+#addestramento del modello
+training_args = TrainingArguments(
+    report_to='wandb',
+    output_dir='./resultsNEW10',
+    evaluation_strategy='epoch',
+    save_strategy='epoch',
+    learning_rate=5e-5,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    num_train_epochs=10,
+    weight_decay=0.01,
+    logging_dir='./logs',
+    logging_steps=10,
+)
+
+
+metric = load_metric("accuracy")
+precision_metric = load_metric("precision")
+recall_metric = load_metric("recall")
+f1_metric = load_metric("f1")
+
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    predictions = np.argmax(predictions, axis=1)
+    accuracy = metric.compute(predictions=predictions, references=labels)
+    precision = precision_metric.compute(predictions=predictions, references=labels, average='weighted')
+    recall = recall_metric.compute(predictions=predictions, references=labels, average='weighted')
+    f1 = f1_metric.compute(predictions=predictions, references=labels, average='weighted')
+    return {**accuracy, **precision, **recall, **f1}
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset,
+    tokenizer=tokenizer,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics
+)
+
+trainer.train()
+
+#directory di output
+output_dir = './resultsNEW10'
+
+#creo la directory se non esiste
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+#salvo il modello e il tokenizer
+model.save_pretrained(output_dir)
+tokenizer.save_pretrained(output_dir)
+
+#salvo i risultati dell'addestramento e della valutazione
+trainer.save_model(output_dir)
+
+#eseguo la valutazione sul dataset di test e salvo i risultati
+predictions = trainer.predict(test_dataset)
+preds = np.argmax(predictions.predictions, axis=1)
+accuracy = accuracy_score(test_df['label'], preds)
+report = classification_report(test_df['label'], preds, target_names=class_names, output_dict=True)
+
+metrics = {
+    'accuracy': accuracy,
+    'classification_report': report
+}
+
+with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
+    json.dump(metrics, f, indent=4)
+
+
+cm = confusion_matrix(test_df['label'], preds)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+disp.plot(cmap=plt.cm.Blues)
+plt.title('Confusion Matrix')
+plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
+plt.show()
+
+print(f"Modello, tokenizer e metriche salvati in {output_dir}")
